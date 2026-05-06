@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+set -u
+
+LOG=/var/log/shutdown-win11-looking-glass.log
+
+{
+  echo "=== $(date -Is) cleanup start ==="
+
+  echo "Stopping Looking Glass client..."
+  pkill -TERM looking-glass-client 2>/dev/null || true
+  sleep 2
+  pkill -KILL looking-glass-client 2>/dev/null || true
+
+  if virsh dominfo win11 >/dev/null 2>&1; then
+    state="$(virsh domstate win11 2>/dev/null || true)"
+    echo "win11 state: $state"
+
+    if [ "$state" = "running" ] || [ "$state" = "paused" ]; then
+      echo "Requesting clean VM shutdown..."
+      virsh shutdown win11 || true
+
+      for i in $(seq 1 60); do
+        state="$(virsh domstate win11 2>/dev/null || true)"
+        echo "wait $i: win11 state: $state"
+
+        if [ "$state" = "shut off" ]; then
+          echo "win11 is shut off"
+          break
+        fi
+
+        sleep 1
+      done
+
+      state="$(virsh domstate win11 2>/dev/null || true)"
+      if [ "$state" != "shut off" ]; then
+        echo "VM did not shut down within 60s; destroying VM to protect host reboot"
+        virsh destroy win11 || true
+      fi
+    fi
+  else
+    echo "win11 not known to virsh or libvirt unavailable"
+  fi
+
+  echo "=== $(date -Is) cleanup done ==="
+} >> "$LOG" 2>&1
+
+exit 0
