@@ -1,0 +1,16 @@
+[Unit]
+Description=Cleanly stop Looking Glass and win11 before host shutdown
+Requires=libvirtd.service
+After=libvirtd.service
+After=virtqemud.service
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+ExecStop=/usr/local/sbin/shutdown-win11-looking-glass
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target
