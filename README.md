@@ -1,322 +1,475 @@
-# GPU Passthrough Scripts for QEMU/libvirtd with KVMFR and Looking Glass
+# GPU Passthrough Guide using QEMU/libvirtd with KVMFR and Looking Glass
 Scripts and file structure to setup dynamic dGPU passthrough for qemu on Ubuntu. Everything in the hooks folder belongs in /etc/libvirt/hooks
 The shutdown scripts are for shutdown protection in Ubuntu 24.04 LTS and org.gnome.Shell@wayland.service contains a block to be added to the service on Ubuntu to prevent gnome-shell from creating a process on the NVIDIA dGPU on startup.
 
-Specs: Lenovo Legion 7 Pro with Intel Ultra 9 275HX and NVIDIA 5080 Max-Q with a 1TB NVMe SSD 
+#### Specs of computer used for this guide: Lenovo Legion 7 Pro laptop with Intel Ultra 9 275HX, NVIDIA 5080 Max-Q, 32GB RAM, and 1TB NVMe SSD
 
-OS: Ubuntu 24.04 LTS, Windows 11 25H2 
+#### OS: Ubuntu 24.04 LTS, Windows 11 25H2 (virtual machine)
 
-Software versions used: NVIDIA 580-open, virtio-win-0.1.285.iso, Looking Glass B7 
+#### Software versions used: NVIDIA 580-open, virtio-win-0.1.285.iso, Looking Glass B7 
 
-Goal: Functional Ubuntu with its desktop environment running on the Intel integrated GPU (iGPU), with the ability to run compute tasks on the Nvidia dedicated GPU (dGPU), along with a Windows virtual machine (VM) accessed via Looking Glass that can bind to the dGPU on start-up for graphics intensive tasks, such as Altium, and release it back to Ubuntu when shut down. 
+#### Goal: Functional Ubuntu with its desktop environment running on the Intel integrated GPU (iGPU), with the ability to run compute tasks on the Nvidia dedicated GPU (dGPU), along with a Windows virtual machine (VM) accessed via Looking Glass that can bind to the dGPU on start-up for graphics intensive tasks, such as Altium, and release it back to Ubuntu when shut down. 
 
 Notes: Ubuntu will not be able to use the dGPU at all when the VM is on. This is expected behavior due to the implementation of the gpu-passthrough. If the dGPU is needed for tasks in Ubuntu, make sure to first shut down the VM. This guide is written for beginners in mind and therefore designed to minimize terminal navigation/use, with nano used to edit files. More advanced users can follow the instructions however they’re used to. Sometimes if the computer is left off for too long goes to sleep too many time (unconfirmed), the VM will crash and cause the GPU drivers to be unavailable, required a multi-restart process.
 
 Known issues: Requires two restarts if the display driver crashes or is unavailable when Ubuntu is shut down or restarted. Brief black screens after Ubuntu starts and after logging in. Sometimes if the computer is left off for too long goes to sleep too many time (unconfirmed), the VM will crash and cause the GPU drivers to be unavailable, required a multi-restart process.
 
- 
 
-    BIOS setup and Ubuntu installation 
+## 1. BIOS setup and Ubuntu installation
 
-    Download the Ubuntu 24.04 LTS .iso and copy it onto a >8GB flash drive. Ideally format the flash drive as FAT32 before this for maximum compatibility with UEFI/BIOS. 
+Download the Ubuntu 24.04 LTS .iso and copy it onto a >8GB flash drive. Ideally format the flash drive as FAT32 before this for maximum compatibility with UEFI/BIOS. https://releases.ubuntu.com/noble/. Shut down the computer and leave the flash drive plugged in. 
 
-    https://releases.ubuntu.com/noble/ 
+### a. BIOS settings
 
-    Shut down the computer and leave the flash drive plugged in. 
+Start the computer and enter the BIOS by repeatedly pressing F2 (may be Del on some systems).
 
-    Start the computer and enter the BIOS by repeatedly pressing F2 (may be Del on some systems) 
+Navigate to the Boot section in your BIOS and change the boot order so that the flash drive is first. While in the BIOS, ensure that the virtualization and Intel VT-d is enabled and the graphics are on dynamic mode. Save the BIOS settings and exit.
 
-    Navigate to the Boot section in your BIOS and change the boot order so that the flash drive is first. 
+The computer should now boot from the flash drive and load the Ubuntu .iso. 
 
-    While in the BIOS, ensure that the virtualization and Intel VT-d is enabled and the graphics are on dynamic mode. 
+### b. Install Ubuntu
 
-    Save the BIOS settings and exit the BIOS 
+Follow the instructions to install Ubuntu 24.04 LTS on the primary drive. Do not select the option to install additional drivers or codecs. These can be installed as needed afterwards.
 
-    Now, the computer should start the Ubuntu installer from the flash drive.  
+Select the option to wipe the entire drive during installation (disregard if the drive has custom partitions setup). Proceed with the installation and follow the instructions on screen.
 
-    Follow the instructions to install Ubuntu 24.04 LTS on the primary drive.  
+## 2. Install drivers and clear processes from dGPU 
 
-    Do not select the option to install additional drivers or codecs. These can be installed as needed afterwards 
+Open terminal and run `sudo apt update && sudo apt upgrade` to update all current packages. 
 
-    Select the option to wipe the entire drive during installation. 
+### Install NVIDIA drivers 
 
-    Proceed with the installation and follow the instructions on screen. 
+Check for available NVIDIA drivers. In this example, the NVIDIA 580 open-source drivers have been used, but the latest drivers should work as well.
 
-    Install drivers and clear processes from dGPU 
+```bash
+sudo ubuntu-drivers list
+sudo ubuntu-drivers install nvidia:580-open
+```
 
-    Open terminal and run sudo apt update && sudo apt upgrade to update all current packages. 
+Reboot, then run `nvidia-smi` in the terminal to confirm that the drivers are loaded. 
 
-    Install NVIDIA drivers 
+### Make sure that prime-select mode is set to on-demand. 
 
-    sudo ubuntu-drivers list 
-    sudo ubuntu-drivers install nvidia:580-open 
+Run:
+```bash
+sudo apt install nvidia-prime 
+prime-select query 
+```
 
-    Reboot, then run nvidia-smi in the terminal to confirm that the drivers are loaded. 
+If this doesn’t output `on-demand`, run `prime-select on-demand` and reboot. 
 
-    Make sure that prime-select mode is set to on-demand. 
+Upon rebooting, do not log in yet. Select the user on the start screen and on the following password screen, click on the gear in the bottom right and make sure that "Ubuntu on Wayland" is selected. If the only options are "Ubuntu on Xorg" or "Ubuntu", make sure that "Ubuntu" is selected. This guide is only designed to work with the default: Ubuntu GNOME on Wayland.
 
-    sudo apt install nvidia-prime 
-    prime-select query 
+Run:
 
-    If this doesn’t output on-demand, do prime-select on-demand and reboot. 
+```bash
+sudo dmesg | grep -E "VT-d|AMD-Vi"
+```
+This should show `VT-d active`. If it doesn’t, make sure that VT-d is turned on in the BIOS and dynamic graphics is enabled, if that setting is available. 
 
-    Upon rebooting, do not log in yet. Select the user on the start screen and on in password screen, click on the gear in the bottom right and make sure that Ubuntu on Wayland is selected. If the only options are Ubuntu on Xorg or Ubuntu, make sure that Ubuntu is selected. Do not use Xorg. 
+Next, run:
 
-    Check sudo dmesg | grep -E "VT-d|AMD-Vi". This should show “VT-d active”. If it doesn’t, make sure that VT-d is turned on in the BIOS and dynamic graphics is enabled, if that setting is available. 
+```bash
+nvidia-smi
+```
 
-    Check nvidia-smi. This should show “No running processes found”. Also check sudo fuser -v /dev/nvidia* 2>/dev/null. This should output nothing. 
+This should show `No running processes found`. Also check that:
 
-    If these show that Xorg has a process open, log out and make sure that Wayland is selected on the login screen. 
+```bash
+sudo fuser -v /dev/nvidia* 2>/dev/null
+```
+outputs nothing. 
 
-    In the fairly likely case that these show that gnome-shell has an active process on the dGPU, add a GNOME shell override. 
+If any of these show that Xorg has a process open, log out and make sure that Wayland is selected on the login screen. 
 
-    Run systemctl --user edit org.gnome.Shell@wayland.service 
+### In the likely case that these show that `gnome-shell` has an active process on the dGPU, add a GNOME shell override: 
 
-    Add the following lines: 
-    [Service] 
-    ExecStartPre=/usr/bin/mkdir -p /tmp/egl_vendor.d 
-    ExecStartPre=/usr/bin/rm -f /tmp/egl_vendor.d/10_nvidia.json 
-    ExecStartPre=/usr/bin/ln -fs /usr/share/glvnd/egl_vendor.d/50_mesa.json /tmp/egl_vendor.d/50_mesa.json 
-    Environment=__EGL_VENDOR_LIBRARY_DIRS=/tmp/egl_vendor.d 
-    ExecStartPost=/usr/bin/ln -fs /usr/share/glvnd/egl_vendor.d/10_nvidia.json /tmp/egl_vendor.d/10_nvidia.json 
+Run:
+```bash
+systemctl --user edit org.gnome.Shell@wayland.service
+```
 
-    Run systemctl --user daemon-reload 
+Add the following lines, found in `org.gnome.Shell@wayland.service` in this repo: 
 
-    Reboot. Double check that Wayland is selected on the login screen. 
+```bash
+[Service] 
+ExecStartPre=/usr/bin/mkdir -p /tmp/egl_vendor.d 
+ExecStartPre=/usr/bin/rm -f /tmp/egl_vendor.d/10_nvidia.json 
+ExecStartPre=/usr/bin/ln -fs /usr/share/glvnd/egl_vendor.d/50_mesa.json /tmp/egl_vendor.d/50_mesa.json 
+Environment=__EGL_VENDOR_LIBRARY_DIRS=/tmp/egl_vendor.d 
+ExecStartPost=/usr/bin/ln -fs /usr/share/glvnd/egl_vendor.d/10_nvidia.json /tmp/egl_vendor.d/10_nvidia.json 
+```
+Run:
+```bash
+systemctl --user daemon-reload
+``` 
 
-    Check nvidia-smi and sudo fuser -v /dev/nvidia* 2>/dev/null again. These should now have the correct outputs. 
+Reboot. Double check that Wayland is selected on the login screen. 
 
-    Setup for the virtual machine 
+Double check: 
+```bash
+nvidia-smi
+sudo fuser -v /dev/nvidia* 2>/dev/null
+```
+These should now show that no processes are running on the dGPU. 
 
-    Install virt-manager to manage the virtual machine 
+## 3. Setup for the virtual machine 
 
-    sudo apt install libvirt-daemon-system libvirt-clients qemu-kvm qemu-utils virt-manager ovmf 
+### Install virt-manager to manage the virtual machine 
 
-    Edit GRUB by opening /etc/default/grub as root (sudo nano /etc/default/grub) 
+Install dependencies:
+```bash
+sudo apt install libvirt-daemon-system libvirt-clients qemu-kvm qemu-utils virt-manager ovmf 
+```
 
-    Find this line: GRUB_CMDLINE_LINUX_DEFAULT="quiet splash" and change it to GRUB_CMDLINE_LINUX_DEFAULT="quiet splash intel_iommu=on iommu=pt" 
+Edit GRUB by opening `/etc/default/grub` as root 
 
-    Update GRUB: sudo update-grub 
+```bash
+sudo nano /etc/default/grub
+```
 
-    Open /etc/initramfs-tools/modules as root and add the following lines to the end: 
-    vfio 
-    vfio_iommu_type1 
-    vfio_pci 
-    vhost-net 
+Find this line: 
+```bash
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"
+```
 
-    Make sure these are loaded on boot with sudo update-initramfs –u 
+and change it to  
 
-    Reboot and run sudo dmesg | grep -e DMAR -e IOMMU. This should have a line that says DMAR: Intel(R) Virtualization Technology for Directed I/O.  
+```bash
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash intel_iommu=on iommu=pt"
+```
 
-    Set up the virtual machine 
+Update GRUB: 
+```bash
+sudo update-grub
+``` 
 
-    Download a Windows 11 .iso. https://www.microsoft.com/en-us/software-download/windows11 
+Open `/etc/initramfs-tools/modules` as root and add the following lines to the end:
+```bash
+vfio 
+vfio_iommu_type1 
+vfio_pci 
+vhost-net 
+```
 
-    Download the latest .iso version of virtio-win-guest-tools. https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/. 
+Make sure these are loaded on boot with: 
 
-    Start virt-manager. 
+```bash
+sudo update-initramfs –u
+```
 
-    Select File > New Virtual Machine. 
+Reboot and run:
+```bash
+sudo dmesg | grep -e DMAR -e IOMMU
+```
 
-    In the pop-up windows, select Local install media and select Forward 
+This should output a line that says 
+```bash
+DMAR: Intel(R) Virtualization Technology for Directed I/O
+```
 
-    On the next page (Step 2), browse for the Windows 11 .iso downloaded earlier and select Forward. 
+### Set up the virtual machine 
 
-    On the next page (Step 3), choose the appropriate memory and CPUs for the virtual machine. On a 32GB machine with an Ultra i9 275HX (8 performance cores, 16 efficiency cores), 16GB of RAM and 8 CPU cores are a good place to start. 
+Download the latest Windows 11 .iso: https://www.microsoft.com/en-us/software-download/windows11 
 
-    On the next page (Step 4), make sure “Enable storage for this virtual machine” and “Create a disk image for the virtual machine” is selected. On a 1TB drive, 256GB, 384GB, or 512GB are good places to start. 
+Download the latest .iso version of virtio-win-guest-tools: https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/. 
 
-    On the next page, (Step 5), name the virtual machine something appropriate. The default name of “win11” is appropriate. If any changes are made to the name, ensure that “win11” in any further steps is replaced with the selected name. Select “Customize configuration before install”. 
+Start virt-manager (Virtual Machine Manager). 
 
-    Open the details page for the new VM. In the CPU tab, make sure that “Copy host CPU configuration (host-passthrough)” is checked. Open the Topology dropdown and check “Manually set CPU topology”. Set “Sockets” to 1, “Cores” to the desired number of cores, and “Threads” to 1. 
+Select File > New Virtual Machine. In the pop-up windows, select "Local install media" and select Forward.
 
-    In the Disk drive tab, make sure that the Disk bus is set to virtio. 
+On the next page (Step 2), browse for the Windows 11 .iso downloaded earlier and select Forward. 
 
-    In the NIC :xx:xx:xx:xx  tab, make sure that Device model is set to virtio. 
+On the next page (Step 3), choose the appropriate memory and CPUs for the virtual machine. On a 32GB machine with an Ultra i9 275HX (8 performance cores, 16 efficiency cores), a good place to start would be 16GB of RAM and 8 CPU cores. 
 
-    In the TPM tab, make sure that Type is Emulated, Model is CRB, and Version is 2.0. 
+On the next page (Step 4), make sure “Enable storage for this virtual machine” and “Create a disk image for the virtual machine” is selected. On a 1TB drive, 256GB, 384GB, or 512GB are good places to start. 
 
-    Remove the Tablet device. 
+On the next page, (Step 5), name the virtual machine something appropriate. The default name of “win11” will be used for the remainder of this guide. If any changes are made to the name, ensure that “win11” in any further steps is replaced with the selected name. Select “Customize configuration before install”. 
 
-    Select Add Hardware at the bottom left.  
+Open the Details page for the new VM. In the CPU tab, make sure that “Copy host CPU configuration (host-passthrough)” is checked. Open the Topology dropdown and check “Manually set CPU topology”. Set Sockets to 1, Cores to the desired number of cores, and Threads to 1. 
 
-    Select the Storage tab 
+In the Disk drive tab, make sure that the Disk bus is set to virtio. 
 
-    Select “Select or create custom storage”. Select Manage... and choose the virtio-win-x.x.xxx.iso downloaded earlier. 
+In the NIC :xx:xx:xx:xx tab, make sure that Device model is set to virtio. 
 
-    Install Windows on the virtual machine 
+In the TPM tab, make sure that Type is Emulated, Model is CRB, and Version is 2.0. 
 
-    After configuring the VM, go to Virtual Machine > Run. 
+Select the Tablet device and remove it.
 
-    Press enter when prompted in the BIOS to boot from the Windows 11 .iso. 
+Select Add Hardware at the bottom left, select the Storage tab, and select “Select or create custom storage”. Select Manage... and choose the virtio-win-x.x.xxx.iso downloaded earlier. 
 
-    Go through the Windows installation steps. When at the point where Windows asks for a drive to be installed on, the VirtIO storage drivers will need to be installed first for the drive to be recognized. 
+## 4. Install Windows on the virtual machine 
 
-    Select Load driver 
+After configuring the VM, go to Virtual Machine > Run. Press enter when prompted in the BIOS to boot from the Windows 11 .iso. 
 
-    Browse to the VirtIO CD and navigate to viostor/w11/amd64. Select this folder and the drive should appear with the size selected during virtual machine setup. 
+Go through the Windows installation steps. At the point where Windows asks for a drive to be installed on, the VirtIO storage drivers will need to be installed first for the drive to be recognized.
 
-    Proceed with the Windows installation as usual. When the computer reboots into the installer with the Windows 11 UI, and prompts for a country, open the command line with Shift + F10 and run oobe/bypassnro. This will reboot the installer and make it so that Windows can be installed without internet or a Microsoft account. These can be added later as needed. 
+Select Load driver, browse to the VirtIO CD-ROM, and navigate to `viostor/w11/amd64`. Select this folder and the drive should appear with the size selected during virtual machine setup. 
 
-    Setup GPU-passthrough 
+Proceed with the Windows installation as usual. When the computer reboots into the installer with the Windows 11 UI and prompts for a country, open the command line with Shift + F10 and run:
 
-    Download the following repo. Click the “<> Code” dropdown and then Download ZIP. https://github.com/hongybun/qemu_gpu-passthrough_hooks 
+```ps1
+oobe/bypassnro
+```
+This will reboot the installer and make it so that Windows can be installed without internet or a Microsoft account. These can be added later as needed. 
 
-    Open the Ubuntu file manager and select the address bar. Type “admin://” to open as root and navigate to /etc/libvirt/hooks 
+## 5. Setup GPU-passthrough 
 
-    Copy everything in the hooks folder from the downloaded GitHub repo to /etc/libvirt/hooks. 
+Download the files in this repo by clicking the “<> Code” dropdown and then Download ZIP.
 
-    Find the GPU IOMMU group by running find /sys/kernel/iommu_groups/ -type l -exec basename {} \; | sort | xargs -I % lspci -nns % 
+Open the Ubuntu file manager and select the address bar. Type `admin://` to open as root and navigate to `/etc/libvirt/hooks`. Copy everything in the `hooks` folder from the downloaded GitHub repo to `/etc/libvirt/hooks`. 
 
-    This will print a table of PCI address and devices. Find the addresses that correspond to VGA compatible controller and Audio device for the dGPU. Ideally the VGA compatible controller and Audio device will both be in the same group with no other devices in the group 
+Find the GPU IOMMU group by running 
+```bash
+find /sys/kernel/iommu_groups/ -type l -exec basename {} \; | sort | xargs -I % lspci -nns %
+```
 
-    Open the virtual machine details in virt-manager and add the GPU VGA compatible controller and Audio device by referencing the PCI addresses. 
+This will print a table of PCI address and devices. Find the addresses that correspond to VGA compatible controller and Audio device for the dGPU. Ideally the VGA compatible controller and Audio device will both be in the same group with no other devices in the group. In this guide, the PCI addresses used are 02:00.0 and 02:00.1 for the VGA compatible controller and the Audio device, respectively. If there are other devices in the group, check other resources for how to proceed before continuing.
 
-    Before starting the virtual machine, run lspci -k | grep -A 3 -i "NVIDIA" and verify that for the VGA compatible controller, the Kernel driver in use: lists nvidia and for the Audio device, the Kernel driver in use: lists snd_hda_intel. 
+Open the virtual machine details in virt-manager and add the GPU VGA compatible controller and Audio device by referencing the PCI addresses found previously.
 
-    Start the virtual machine.  
+Before starting the virtual machine, run: 
 
-    Run lspci -k | grep -A 3 -i "NVIDIA" and verify that for the VGA compatible controller, the Kernel driver in use: lists virtio and for the Audio device, the Kernel driver in use: lists virtio. 
+```bash
+lspci -k | grep -A 3 -i "NVIDIA"
+```
+and verify that for the VGA compatible controller, the `Kernel driver in use:` lists `nvidia` and for the Audio device, the `Kernel driver in use:` lists `snd_hda_intel`. The exact drivers in use may vary based on the machine, but they should not say `vfio-pci`.
 
-    After booting into Windows, install network drivers: Open Device Manager, right click the Network adapter, select Update, then in the pop-up window, select “Browse my computer for driver software.” On the next screen, browse to the virtio-win CD-ROM. In the CD-ROM, navigate to NetKVM >  w11 > amd64 and install the driver from there. Internet access should now be restored. 
+Start the virtual machine.  
 
-    While in Device Manager, also install the keyboard drivers: Right click the keyboard, select Update, then “Browse my computer for driver software.” On the next screen, browse to the virtio-win CD-ROM. In the CD-ROM, navigate to vioinput >  w11 > amd64 and install the driver from there. Without doing this, the keyboard should still work but may not be able to pass through keys being held. 
+In Ubuntu, run: 
 
-    Install NVIDIA Drivers 
+```bash
+lspci -k | grep -A 3 -i "NVIDIA"
+```
 
-    Download the latest NVIDIA drivers by entering the information for the dGPU and select the Studio or Game-Ready drivers depending on the intended use-case for the Windows VM. https://www.nvidia.com/en-us/drivers/ 
+and verify that for the VGA compatible controller, the `Kernel driver in use:` lists `vfio-pci` and for the `Audio device`, the `Kernel driver in use:` lists `vfio-pci`. 
 
-    Proceed with the driver installation. Probably do not select the USB-C driver unless it is needed (untested). 
+### After booting into Windows, install network drivers
 
-    After installation, restart the Windows VM, open Task Manager, and check the resources tab. The NVIDIA dGPU should show up with the expected specifications. Also check Device Manager and make sure that the NVIDIA GPU shows up there under Display as well. 
+Open Device Manager, right click the Network adapter, select Update, then in the pop-up window, select “Browse my computer for driver software.” On the next screen, browse to the virtio-win CD-ROM. In the CD-ROM, navigate to `NetKVM/w11/amd64` and install the driver from there. Internet access should now be restored. 
 
-    The Windows VM should now be able to use the GPU. 
+While in Device Manager, also install the keyboard drivers: Right click the keyboard, select Update, then “Browse my computer for driver software.” On the next screen, browse to the virtio-win CD-ROM. In the CD-ROM, navigate to `vioinput/w11/amd64` and install the driver from there. Without doing this, the keyboard should still work but may not be able to pass through keys being held. 
 
-    Set up Looking Glass for near-native response time and performance. 
+### Install NVIDIA Drivers 
 
-    Build the Looking Glass client on Ubuntu 
+Download the latest NVIDIA drivers by entering the information for the dGPU on the NVIDIA driver website and select the Studio or Game-Ready drivers depending on the intended use-case for the Windows VM. https://www.nvidia.com/en-us/drivers/ 
 
-    Install dependencies: sudo apt install binutils-dev cmake fonts-dejavu-core libfontconfig-dev gcc g++ pkg-config libegl-dev libgl-dev libgles-dev libspice-protocol-dev nettle-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libpipewire-0.3-dev libpulse-dev libsamplerate0-dev 
+Proceed with the driver installation. Probably do not select the USB-C driver unless it is needed (untested for this guide). 
 
-    Download the source files: https://looking-glass.io/downloads. Go to the latest stable version in the table and select Source. 
+After installation, restart the Windows VM, open Task Manager, and check the Resources tab. The NVIDIA dGPU should show up with the expected specifications. Also check Device Manager and make sure that the NVIDIA GPU shows up there under Display as well. The Windows VM should now be able to use the GPU. 
 
-    Decompress the downloaded file and navigate into it. Navigate to client, then create a folder named build. 
+## 6. Set up Looking Glass for near-native response time and performance. 
 
-    In the build folder (looking-glass-b7/client/build) open a terminal and run  
-    cmake ../ 
-    make 
+### Build the Looking Glass client on Ubuntu 
 
-    Install Looking Glass with sudo make install 
+Install dependencies: 
+```bash
+sudo apt install binutils-dev cmake fonts-dejavu-core libfontconfig-dev gcc g++ pkg-config libegl-dev libgl-dev libgles-dev libspice-protocol-dev nettle-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libpipewire-0.3-dev libpulse-dev libsamplerate0-dev
+```
 
-    Set up libvirt and QEMU (IVSHMEM with KVMFR) 
+Download the source files: https://looking-glass.io/downloads. Go to the latest stable version in the table and select Source. Decompress the downloaded file and navigate into it. Navigate to client, then create a folder named build. 
 
-    							 
+In the build folder (`looking-glass-b7/client/build`) open a terminal and run:
 
-    				looking-glass-b7/module) and run dkms install "." 
+```bash
+cmake ../ 
+make
+```
 
-    Create /etc/modprobe.d/kvmfr.conf and add the following line, replacing “128” with the desired amount of memory calculated earlier: 
-    options kvmfr static_size_mb=128 
+Install Looking Glass with:
 
-    Run modprobe kvmfr. Run dmesg | grep “kvmfr”, the following line should show up. This may or may not work. 
-    kvmfr: creating 1 static devices 
+```bash
+sudo make install
+```
 
-    Create /etc/modules-load.d/kvmfr.conf and add the following lines so that KVMFR loads at boot. 
-    # KVMFR Looking Glass module 
-    kvmfr 
+### Set up libvirt and QEMU (IVSHMEM with KVMFR) 
 
-    Permissions 
+Install the Linux kernel headers:
 
-    Run ls -l /dev/kvmfr0 and the following output should appear (the file may or may not be owned by root): 
-    crw------- 1 root root 242, 0 Mar  5 05:53 /dev/kvmfr0 
+```bash
+sudo apt install linux-headers-$(uname -r) dkms
+```
 
-    Run sudo chown user:kvm /dev/kvmfr0 to set the permissions on the file correctly 
+Browse to `looking-glass-b7/module` and run:
 
-    Create the file /etc/udev/rules.d/99-kvmfr.rules and add the following line, replacing “user” the Ubuntu user’s username: 
-    SUBSYSTEM=="kvmfr", OWNER="user", GROUP="kvm", MODE="0660" 
+```bash
+dkms install "."
+``` 
 
-    Create /etc/apparmor.d/local/abstractions/libvirt-qemu and add: 
-    # Looking Glass 
-    /dev/kvmfr0 rw, 
+Create `/etc/modprobe.d/kvmfr.conf` and add the following line, replacing `128` with the desired amount of memory calculated earlier
+```bash
+options kvmfr static_size_mb=128
+```
 
-    Edit /etc/libvirt/qemu.conf. Find the cgroup_device_acl, uncomment it, and add "/dev/kvmfr0" to the end of the list. Make sure to add a comma to the previous entry in the list. 
+Run: 
 
-    Restart livirtd: sudo systemctl restart libvirtd.service 
+```bash
+modprobe kvmfr
+```
 
-    Virt-manager XML edits for libvirt 
+Then, run:
 
-    Edit the <domain> tag near the top of the XML file to be: 
-    <domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'> 
+```bash
+dmesg | grep “kvmfr”
+```
 
-    At the bottom of the XML file, after the closing </devices> block and before the closing </domain> block, add the following XML block. The number after size should be the calculated memory size from earlier converted from MB to B. (size_in_bytes = size_in_MB x 1024 x 1024)  
-    <qemu:commandline> 
-     <qemu:arg value="-device"/> 
-     <qemu:arg value="{'driver':'ivshmem-plain','id':'shmem0','memdev':'looking-glass'}"/> 
-     <qemu:arg value="-object"/> 
-     <qemu:arg value="{'qom-type':'memory-backend-file','id':'looking-glass','mem-path':'/dev/kvmfr0','size':33554432,'share':true}"/> 
-    </qemu:commandline> 
+The following line should show up. This may or may not work, but if it does, that's a good sign.
 
-    For audio passthrough, edit the sound and audio blocks to be: 
-    <sound model='ich9'> 
-     <audio id='1'/> 
-    </sound> 
-    <audio id='1' type='spice'/> 
+```bash
+kvmfr: creating 1 static devices
+```
 
-    For clipboard synchronization between the VM and Ubuntu, install SPICE guest tools onto the Windows VM (https://www.spice-space.org/download.html#windows-binaries) and edit the spicevmc channel block in the VM’s XML to: 
-    <channel type="spicevmc"> 
-     <target type="virtio" name="com.redhat.spice.0"/> 
-     <address type="virtio-serial" controller="0" bus="0" port="1"/> 
-    </channel> 
+Create `/etc/modules-load.d/kvmfr.conf` and add the following lines so that KVMFR loads at boot. 
 
-    Find the <memballoon> block in the VM’s XML and replace the entire block with: 
-    <memballoon model="none"/> 
+```bash
+# KVMFR Looking Glass module 
+kvmfr 
+```
 
-    Reboot. 
+## 7. Permissions 
 
-    Install the Looking Glass host on the Windows VM  
+Run:>
+```bash
+ls -l /dev/kvmfr0
+```
+and something similar to the following output should appear (the file may or may not be owned by root).
+```bash
+crw------- 1 root root 242, ... /dev/kvmfr0
+```
 
-    Start the Windows VM and download the latest stable Looking Glass Windows host binary. https://looking-glass.io/downloads. 
+It is important that the lines starts with `crw-------`. This indicates that `kvmfr0` is a character file.
 
-    Install it as administrator and follow the prompts. 
+Run:
+```bash
+sudo chown user:kvm /dev/kvmfr0
+```
 
-    Add clean shutdown scripts to prevent errors when restarting or shutting down 
+to set the permissions on the file correctly.
 
-    Download the shutdown-win11-looking-glass from this repo: https://github.com/hongybun/gpu_passthrough_scripts. Put this file in /usr/local/sbin. Replace win11 everywhere with the VM name used earlier. 
+Create the file `/etc/udev/rules.d/99-kvmfr.rules` and add the following line, replacing “user” the Ubuntu user’s username: 
+```bash
+SUBSYSTEM=="kvmfr", OWNER="user", GROUP="kvm", MODE="0660"
+```
 
-    Make this file executable with sudo chmod +x /usr/local/sbin/shutdown-win11-looking-glass 
+Create `/etc/apparmor.d/local/abstractions/libvirt-qemu` and add:
+```bash
+# Looking Glass 
+/dev/kvmfr0 rw, 
+```
 
-    Download win11-clean-shutdown.service from this repo: https://github.com/hongybun/gpu_passthrough_scripts. Put this file in /etc/systemd/system 
+Edit `/etc/libvirt/qemu.conf`. Find the `cgroup_device_acl`, uncomment it, and add `"/dev/kvmfr0"` to the end of the list. Make sure to add a comma to the previous entry in the list. 
 
-    Enable it by running: 
-    sudo systemctl daemon-reload 
-    sudo systemctl enable –now win11-clean-shutdown.service 
+Restart livirtd: 
+```bash
+sudo systemctl restart libvirtd.service
+```
 
-    Check that it is active by running systemctl status win11-clean-shutdown.service 
+## 8. Virt-manager XML edits for libvirt 
 
-    Reboot and confirm that the system doesn't hang 
+Edit the `<domain>` tag near the top of the XML file to be:
 
-    The virtual machine should be working now with Looking Glass and GPU Passthrough! Make sure to always start the virtual machine before starting Looking Glass. 
+```xml
+<domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
+```
 
-    Optional (but useful) tweaks 
+At the bottom of the XML file, after the closing `</devices>` block and before the closing `</domain>` block, add the following XML block. The number after size should be the calculated memory size from earlier converted from MB to B. (size_in_bytes = size_in_MB x 1024 x 1024)
 
-    Edit the Looking Glass capture key from the default ScrollLock to Insert by opening /etc/looking-glass-client.ini and adding the following:   
-    [input] 
-    escapeKey=KEY_INSERT 
+```xml
+<qemu:commandline> 
+ <qemu:arg value="-device"/> 
+ <qemu:arg value="{'driver':'ivshmem-plain','id':'shmem0','memdev':'looking-glass'}"/> 
+ <qemu:arg value="-object"/> 
+ <qemu:arg value="{'qom-type':'memory-backend-file','id':'looking-glass','mem-path':'/dev/kvmfr0','size':33554432,'share':true}"/> 
+</qemu:commandline> 
+```
 
-    KEY_INSERT can be replaced with any desired key. In this case, the Lenovo Legion 7 Pro does not have a ScrollLock key, so Insert was used instead. 
+For audio passthrough, edit the sound and audio blocks to be: 
 
-    Hold the escapeKey set in the config file while Looking Glass is open to see a list of useful shortcuts, including how to make Looking Glass fullscreen. 
+```xml
+<sound model='ich9'> 
+ <audio id='1'/> 
+</sound> 
+<audio id='1' type='spice'/> 
+```
 
-    Remap the Copilot key (F23+LeftShift+LeftMeta) to RightControl by installing keyd: sudo apt install keyd 
+For clipboard synchronization between the VM and Ubuntu, install SPICE guest tools onto the Windows VM (https://www.spice-space.org/download.html#windows-binaries) and edit the spicevmc channel block in the VM’s XML to: 
 
-    Then edit /etc/keyd/default.conf by adding this: 
-    [main] 
-    f23+leftshift+leftmeta = rightcontrol 
+```xml
+<channel type="spicevmc"> 
+ <target type="virtio" name="com.redhat.spice.0"/> 
+ <address type="virtio-serial" controller="0" bus="0" port="1"/> 
+</channel> 
+```
 
-    A personal recommendation would be to change the CapsLock key to another Backspace by adding capslock = backspace to the [main] block. 
+Find the <memballoon> block in the VM’s XML and replace the entire block with: 
 
- 
+```xml
+<memballoon model="none"/> 
+```
 
-Resources: 
+Reboot. 
+
+### Install the Looking Glass host on the Windows VM  
+
+Start the Windows VM and download the latest stable Looking Glass Windows host binary: https://looking-glass.io/downloads. Install it as administrator and follow the prompts. 
+
+### Add clean shutdown scripts to prevent errors when restarting or shutting down 
+
+Put the `shutdown-win11-looking-glass` from this repo in `/usr/local/sbin`. Replace `win11` everywhere with the VM name chosen earlier if it is different.
+
+Make this file executable with 
+
+```bash
+sudo chmod +x /usr/local/sbin/shutdown-win11-looking-glass
+```
+
+Put `win11-clean-shutdown.service` from this repo in `/etc/systemd/system` 
+
+Enable it by running: 
+
+```bash
+sudo systemctl daemon-reload 
+sudo systemctl enable –now win11-clean-shutdown.service
+```
+
+Check that it is active by running 
+
+```bash
+systemctl status win11-clean-shutdown.service
+```
+
+Reboot and confirm that the system doesn't hang. If successful, the virtual machine should be working with Looking Glass and GPU Passthrough! Make sure to always start the virtual machine before starting Looking Glass. Always shut down the virtual machine before shutting down Ubuntu.
+
+## Optional tweaks 
+
+Edit the Looking Glass capture key from the default ScrollLock to Insert by opening `/etc/looking-glass-client.ini` and adding the following:
+
+```ini
+[input] 
+escapeKey=KEY_INSERT
+```
+
+`KEY_INSERT` can be replaced with any desired key. In this case, the Lenovo Legion 7 Pro does not have a dedicated ScrollLock key, so Insert was used instead. 
+
+Hold the escapeKey (Insert in this case) set in the config file while Looking Glass is open to see a list of useful shortcuts, including how to make Looking Glass fullscreen. 
+
+Remap the Copilot key (F23+LeftShift+LeftMeta) to RightControl by installing keyd: 
+
+```bash
+sudo apt install keyd
+```
+
+Then edit `/etc/keyd/default.conf` by adding this:
+
+```ini
+[main] 
+f23+leftshift+leftmeta = rightcontrol
+```
+
+A personal recommendation would be to change the CapsLock key to another Backspace by adding `capslock = backspace` to the `[main]` block. 
+
+## Resources: 
 
 https://github.com/slackdaystudio/qemu-gpu-passthrough 
 
