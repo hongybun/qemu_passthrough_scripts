@@ -19,7 +19,7 @@ Known issues: Requires two restarts if the display driver crashes or is unavaila
 
 Download the Ubuntu 24.04 LTS .iso and copy it onto a >8GB flash drive. Ideally format the flash drive as FAT32 before this for maximum compatibility with UEFI/BIOS. https://releases.ubuntu.com/noble/. Shut down the computer and leave the flash drive plugged in. 
 
-### a. BIOS settings
+### BIOS settings
 
 Start the computer and enter the BIOS by repeatedly pressing F2 (may be Del on some systems).
 
@@ -27,7 +27,7 @@ Navigate to the Boot section in your BIOS and change the boot order so that the 
 
 The computer should now boot from the flash drive and load the Ubuntu .iso. 
 
-### b. Install Ubuntu
+### Install Ubuntu
 
 Follow the instructions to install Ubuntu 24.04 LTS on the primary drive. Do not select the option to install additional drivers or codecs. These can be installed as needed afterwards.
 
