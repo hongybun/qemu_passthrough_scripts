@@ -1,0 +1,6 @@
+    [Service] 
+    ExecStartPre=/usr/bin/mkdir -p /tmp/egl_vendor.d 
+    ExecStartPre=/usr/bin/rm -f /tmp/egl_vendor.d/10_nvidia.json 
+    ExecStartPre=/usr/bin/ln -fs /usr/share/glvnd/egl_vendor.d/50_mesa.json /tmp/egl_vendor.d/50_mesa.json 
+    Environment=__EGL_VENDOR_LIBRARY_DIRS=/tmp/egl_vendor.d 
+    ExecStartPost=/usr/bin/ln -fs /usr/share/glvnd/egl_vendor.d/10_nvidia.json /tmp/egl_vendor.d/10_nvidia.json
