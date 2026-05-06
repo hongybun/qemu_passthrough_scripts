@@ -3,7 +3,7 @@ Scripts and file structure to setup dynamic dGPU passthrough for qemu on Ubuntu.
 The shutdown scripts are for shutdown protection in Ubuntu 24.04 LTS and `org.gnome.Shell@wayland.service` contains a block to be added to the service on Ubuntu to prevent `gnome-shell` from creating a process on the NVIDIA dGPU on startup.
 
 ### Specs of computer used for this guide
-Lenovo Legion 7 Pro laptop with Intel Ultra 9 275HX, NVIDIA 5080 Max-Q, 32GB RAM, and 1TB NVMe SSD
+Lenovo Legion Pro 7 16IAX10H laptop with Intel Ultra 9 275HX, NVIDIA 5080 Max-Q, 32GB RAM, and 1TB NVMe SSD
 
 ### OS
 Ubuntu 24.04 LTS, Windows 11 25H2 (virtual machine)
@@ -18,15 +18,15 @@ Functional Ubuntu with its desktop environment running on the Intel integrated G
 Ubuntu will not be able to use the dGPU at all when the VM is on. This is expected behavior due to the implementation of the gpu-passthrough. If the dGPU is needed for tasks in Ubuntu, make sure to first shut down the VM. This guide is written for beginners in mind and therefore designed to minimize terminal navigation/use, with nano used to edit files. More advanced users can follow the instructions however they’re used to. Sometimes if the computer is left off for too long goes to sleep too many time (unconfirmed), the VM will crash and cause the GPU drivers to be unavailable, required a multi-restart process.
 
 ### Known issues
-Requires two restarts if the display driver crashes or is unavailable when Ubuntu is shut down or restarted. Brief black screens after Ubuntu starts and after logging in. Sometimes if the computer is left off for too long goes to sleep too many time (unconfirmed), the VM will crash and cause the GPU drivers to be unavailable, required a multi-restart process.
+Requires two restarts if the display driver ever crashes or is unavailable when Ubuntu is shut down or restarted (Can happen if VM crashes without handing the display driver back to Ubuntu). Brief black screens after Ubuntu starts and after logging in. Sometimes if the computer is left off for too long goes to sleep too many times (unconfirmed), the VM will crash and cause the GPU drivers to be unavailable, required a multi-restart process.
 
 ## 1. BIOS setup and Ubuntu installation
 
-Download the Ubuntu 24.04 LTS .iso and copy it onto a >8GB flash drive. Ideally format the flash drive as FAT32 before this for maximum compatibility with UEFI/BIOS. https://releases.ubuntu.com/noble/. Shut down the computer and leave the flash drive plugged in. 
+Format a >8GB flash drive as FAT32 for maximum compatibility with UEFI/BIOS, download the Ubuntu 24.04 LTS .iso, and copy it onto the flash drive. https://releases.ubuntu.com/noble/. Shut down the computer and leave the flash drive plugged in. 
 
 ### BIOS settings
 
-Start the computer and enter the BIOS by repeatedly pressing F2 (may be Del on some systems).
+Power on the computer and enter the BIOS by repeatedly pressing F2 (may be Del on some systems).
 
 Navigate to the Boot section in your BIOS and change the boot order so that the flash drive is first. While in the BIOS, ensure that the virtualization and Intel VT-d is enabled and the graphics are on dynamic mode. Save the BIOS settings and exit.
 
@@ -36,7 +36,7 @@ The computer should now boot from the flash drive and load the Ubuntu .iso.
 
 Follow the instructions to install Ubuntu 24.04 LTS on the primary drive. Do not select the option to install additional drivers or codecs. These can be installed as needed afterwards.
 
-Select the option to wipe the entire drive during installation (disregard if the drive has custom partitions setup). Proceed with the installation and follow the instructions on screen.
+Select the option to wipe the entire drive during installation (disregard if the drive has custom partitions set up). Proceed with the installation and follow the instructions on screen.
 
 ## 2. Install drivers and clear processes from dGPU 
 
@@ -70,6 +70,7 @@ Run:
 ```bash
 sudo dmesg | grep -E "VT-d|AMD-Vi"
 ```
+
 This should show `VT-d active`. If it doesn’t, make sure that VT-d is turned on in the BIOS and dynamic graphics is enabled, if that setting is available. 
 
 Next, run:
@@ -104,7 +105,9 @@ ExecStartPre=/usr/bin/ln -fs /usr/share/glvnd/egl_vendor.d/50_mesa.json /tmp/egl
 Environment=__EGL_VENDOR_LIBRARY_DIRS=/tmp/egl_vendor.d 
 ExecStartPost=/usr/bin/ln -fs /usr/share/glvnd/egl_vendor.d/10_nvidia.json /tmp/egl_vendor.d/10_nvidia.json 
 ```
+
 Run:
+
 ```bash
 systemctl --user daemon-reload
 ``` 
@@ -112,10 +115,12 @@ systemctl --user daemon-reload
 Reboot. Double check that Wayland is selected on the login screen. 
 
 Double check: 
+
 ```bash
 nvidia-smi
 sudo fuser -v /dev/nvidia* 2>/dev/null
 ```
+
 These should now show that no processes are running on the dGPU. 
 
 ## 3. Setup for the virtual machine 
@@ -123,6 +128,7 @@ These should now show that no processes are running on the dGPU.
 ### Install virt-manager to manage the virtual machine 
 
 Install dependencies:
+
 ```bash
 sudo apt install libvirt-daemon-system libvirt-clients qemu-kvm qemu-utils virt-manager ovmf 
 ```
@@ -134,6 +140,7 @@ sudo nano /etc/default/grub
 ```
 
 Find this line: 
+
 ```bash
 GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"
 ```
@@ -179,15 +186,13 @@ Download the latest Windows 11 .iso: https://www.microsoft.com/en-us/software-do
 
 Download the latest .iso version of virtio-win-guest-tools: https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/. 
 
-Start virt-manager (Virtual Machine Manager). 
-
-Select File > New Virtual Machine. In the pop-up windows, select "Local install media" and select Forward.
+Start virt-manager (Virtual Machine Manager). Select File > New Virtual Machine. In the pop-up window, select "Local install media" and select Forward.
 
 On the next page (Step 2), browse for the Windows 11 .iso downloaded earlier and select Forward. 
 
 On the next page (Step 3), choose the appropriate memory and CPUs for the virtual machine. On a 32GB machine with an Ultra i9 275HX (8 performance cores, 16 efficiency cores), a good place to start would be 16GB of RAM and 8 CPU cores. 
 
-On the next page (Step 4), make sure “Enable storage for this virtual machine” and “Create a disk image for the virtual machine” is selected. On a 1TB drive, 256GB, 384GB, or 512GB are good places to start. 
+On the next page (Step 4), make sure “Enable storage for this virtual machine” and “Create a disk image for the virtual machine” is selected. On a 1TB drive, 256GB, 384GB, or 512GB are reasonable places to start. 
 
 On the next page, (Step 5), name the virtual machine something appropriate. The default name of “win11” will be used for the remainder of this guide. If any changes are made to the name, ensure that “win11” in any further steps is replaced with the selected name. Select “Customize configuration before install”. 
 
@@ -216,6 +221,7 @@ Proceed with the Windows installation as usual. When the computer reboots into t
 ```ps1
 oobe/bypassnro
 ```
+
 This will reboot the installer and make it so that Windows can be installed without internet or a Microsoft account. These can be added later as needed. 
 
 ## 5. Setup GPU-passthrough 
@@ -269,6 +275,7 @@ After installation, restart the Windows VM, open Task Manager, and check the Res
 ### Build the Looking Glass client on Ubuntu 
 
 Install dependencies: 
+
 ```bash
 sudo apt install binutils-dev cmake fonts-dejavu-core libfontconfig-dev gcc g++ pkg-config libegl-dev libgl-dev libgles-dev libspice-protocol-dev nettle-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev wayland-protocols libpipewire-0.3-dev libpulse-dev libsamplerate0-dev
 ```
@@ -334,18 +341,22 @@ kvmfr
 
 ## 7. Permissions 
 
-Run:>
+Run:
+
 ```bash
 ls -l /dev/kvmfr0
 ```
-and something similar to the following output should appear (the file may or may not be owned by root).
+
+and something similar to the following output should appear (the file may or may not be owned by root):
+
 ```bash
 crw------- 1 root root 242, ... /dev/kvmfr0
 ```
 
-It is important that the lines starts with `crw-------`. This indicates that `kvmfr0` is a character file.
+It is important that the line starts with `crw-------` before proceeding. This indicates that `kvmfr0` is a character file.
 
 Run:
+
 ```bash
 sudo chown user:kvm /dev/kvmfr0
 ```
@@ -353,11 +364,13 @@ sudo chown user:kvm /dev/kvmfr0
 to set the permissions on the file correctly.
 
 Create the file `/etc/udev/rules.d/99-kvmfr.rules` and add the following line, replacing “user” the Ubuntu user’s username: 
+
 ```bash
 SUBSYSTEM=="kvmfr", OWNER="user", GROUP="kvm", MODE="0660"
 ```
 
 Create `/etc/apparmor.d/local/abstractions/libvirt-qemu` and add:
+
 ```bash
 # Looking Glass 
 /dev/kvmfr0 rw, 
@@ -366,6 +379,7 @@ Create `/etc/apparmor.d/local/abstractions/libvirt-qemu` and add:
 Edit `/etc/libvirt/qemu.conf`. Find the `cgroup_device_acl`, uncomment it, and add `"/dev/kvmfr0"` to the end of the list. Make sure to add a comma to the previous entry in the list. 
 
 Restart livirtd: 
+
 ```bash
 sudo systemctl restart libvirtd.service
 ```
@@ -421,7 +435,7 @@ Start the Windows VM and download the latest stable Looking Glass Windows host b
 
 ### Add clean shutdown scripts to prevent errors when restarting or shutting down 
 
-Put the `shutdown-win11-looking-glass` from this repo in `/usr/local/sbin`. Replace `win11` everywhere with the VM name chosen earlier if it is different.
+Put `shutdown-win11-looking-glass` from this repo in `/usr/local/sbin`. Replace `win11` everywhere in the file and file name with the VM name chosen earlier if it is different.
 
 Make this file executable with 
 
@@ -478,4 +492,16 @@ A personal recommendation would be to change the CapsLock key to another Backspa
 
 https://github.com/slackdaystudio/qemu-gpu-passthrough 
 
-https://looking-glass.io/docs/B7/# 
+https://looking-glass.io/docs/B7
+
+https://releases.ubuntu.com/noble/
+
+https://www.microsoft.com/en-us/software-download/windows11
+
+https://www.nvidia.com/en-us/drivers/
+
+https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio/
+
+https://looking-glass.io/downloads
+
+https://www.spice-space.org/download.html
