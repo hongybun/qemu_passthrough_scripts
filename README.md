@@ -361,9 +361,9 @@ Run:
 sudo chown user:kvm /dev/kvmfr0
 ```
 
-to set the permissions on the file correctly.
+replacing `user` with the Ubuntu user's username to set the permissions on the file correctly.
 
-Create the file `/etc/udev/rules.d/99-kvmfr.rules` and add the following line, replacing “user” the Ubuntu user’s username: 
+Create the file `/etc/udev/rules.d/99-kvmfr.rules` and add the following line, replacing `user` the Ubuntu user’s username: 
 
 ```bash
 SUBSYSTEM=="kvmfr", OWNER="user", GROUP="kvm", MODE="0660"
