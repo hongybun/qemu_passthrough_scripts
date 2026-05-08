@@ -1,6 +1,6 @@
 # Dynamic GPU Passthrough to a Windows virtual machine using QEMU/libvirtd and Looking Glass with KVMFR
 Scripts and file structure to setup dynamic dGPU passthrough for qemu on Ubuntu. Everything in the hooks folder belongs in `/etc/libvirt/hooks`.
-The shutdown scripts are for shutdown protection in Ubuntu 24.04 LTS and `org.gnome.Shell@wayland.service` contains a block to be added to the service on Ubuntu to prevent `gnome-shell` from creating a process on the NVIDIA dGPU on startup.
+The two shutdown scripts are for shutdown protection in Ubuntu 24.04 LTS, and `org.gnome.Shell@wayland.service` contains a block to be added to the service on Ubuntu to prevent `gnome-shell` from creating a process on the NVIDIA dGPU on startup.
 
 ### Specs of computer used for this guide
 Lenovo Legion Pro 7 16IAX10H laptop with Intel Ultra 9 275HX, NVIDIA 5080 Max-Q, 32GB RAM, and 1TB NVMe SSD
@@ -15,10 +15,10 @@ NVIDIA 580-open, virtio-win-0.1.285.iso, Looking Glass B7
 Functional Ubuntu with its desktop environment running on the Intel integrated GPU (iGPU), with the ability to run compute tasks on the Nvidia dedicated GPU (dGPU), along with a Windows virtual machine (VM) accessed via Looking Glass that can bind to the dGPU on start-up for graphics intensive tasks, such as Altium, and release it back to Ubuntu when shut down. 
 
 ### Notes
-Ubuntu will not be able to use the dGPU at all when the VM is on. This is expected behavior due to the implementation of the gpu-passthrough. If the dGPU is needed for tasks in Ubuntu, make sure to first shut down the VM. This guide is written for beginners in mind and therefore designed to minimize terminal navigation/use, with nano used to edit files. More advanced users can follow the instructions however they’re used to. Sometimes if the computer is left off for too long goes to sleep too many time (unconfirmed), the VM will crash and cause the GPU drivers to be unavailable, required a multi-restart process.
+Ubuntu will not be able to use the dGPU at all when the VM is on. This is expected behavior due to the implementation of the gpu-passthrough. If the dGPU is needed for tasks in Ubuntu, make sure to first shut down the VM. This guide is written for beginners in mind and therefore designed to minimize terminal navigation/use, with nano used to edit files.
 
 ### Known issues
-Ubuntu crashes when external display is connected. If the Windows VM is on, it crashes when an external display is connected (but Ubuntu will be fine). Requires two restarts if the display driver ever crashes or is unavailable when Ubuntu is shut down or restarted (Can happen if VM crashes without handing the display driver back to Ubuntu). Brief black screens after Ubuntu starts and after logging in. Sometimes if the computer is left off for too long goes to sleep too many times (unconfirmed), the VM will crash and cause the GPU drivers to be unavailable, required a multi-restart process.
+Ubuntu crashes when external display is connected. If the Windows VM is on, it crashes when an external display is connected (but Ubuntu will be fine). Requires two restarts if the display driver ever crashes or is unavailable when Ubuntu is shut down or restarted (Can happen if VM crashes without handing the display driver back to Ubuntu). Brief black screens after Ubuntu starts and after logging in. Sometimes if the computer is left off for too long or goes to sleep too many times (unconfirmed), the VM will crash and cause the GPU drivers to be unavailable, required a multi-restart process.
 
 ## 1. BIOS setup and Ubuntu installation
 
